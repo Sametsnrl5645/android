@@ -24,7 +24,7 @@ object UrlUtil {
                     .toString()
             } catch (e: IllegalArgumentException) {
                 throw MalformedHttpUrlException(
-                    e.message
+                    e.message,
                 )
             }
         }
@@ -44,26 +44,34 @@ object UrlUtil {
         val asURI = try {
             URI(input.removePrefix("homeassistant://navigate/"))
         } catch (e: Exception) {
-            Timber.w("Invalid input, returning base only")
+            Timber.w(e, "Invalid input, returning base only")
             null
         }
         return when {
-            asURI == null -> {
-                base
-            }
-            isAbsoluteUrl(input) -> {
-                asURI.toURL()
-            }
+            asURI == null -> base
+            isAbsoluteUrl(input) -> asURI.toURL()
             else -> { // Input is relative to base URL
-                val builder = base
-                    ?.toHttpUrlOrNull()
-                    ?.newBuilder()
-                if (!asURI.path.isNullOrBlank()) builder?.addPathSegments(asURI.path.trim().removePrefix("/"))
-                if (!asURI.query.isNullOrBlank()) builder?.query(asURI.query.trim())
-                if (!asURI.fragment.isNullOrBlank()) builder?.fragment(asURI.fragment.trim())
-                builder?.build()?.toUrl()
+                buildRelativeUrl(base, asURI)
             }
         }
+    }
+
+    private fun buildRelativeUrl(base: URL?, inputURI: URI): URL? {
+        val builder = base?.toHttpUrlOrNull()?.newBuilder() ?: return null
+        inputURI.path?.trim()?.takeIf { it.isNotBlank() }?.removePrefix("/")?.let { path ->
+            // If the URL contains a `,`
+            val beforeComma = path.substringBefore(",")
+            val afterComma = path.substringAfter(",", "")
+            builder.addPathSegments(beforeComma)
+            if (afterComma.isNotEmpty()) {
+                builder.addEncodedPathSegment(Uri.encode(",$afterComma"))
+            }
+        }
+
+        inputURI.query?.trim()?.takeIf { it.isNotBlank() }?.let(builder::query)
+        inputURI.fragment?.trim()?.takeIf { it.isNotBlank() }?.let(builder::fragment)
+
+        return builder.build().toUrl()
     }
 
     fun isAbsoluteUrl(it: String?): Boolean {
@@ -84,7 +92,7 @@ object UrlUtil {
     fun splitNfcTagId(it: Uri?): String? {
         val matches =
             Regex("^https?://www\\.home-assistant\\.io/tag/(.*)").find(
-                it.toString()
+                it.toString(),
             )
         return matches?.groups?.get(1)?.value
     }
